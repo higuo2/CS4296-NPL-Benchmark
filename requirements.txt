@@ -1,0 +1,6 @@
+pandas
+scikit-learn
+nltk
+psutil
+boto3
+re

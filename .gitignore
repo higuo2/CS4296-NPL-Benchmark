@@ -1,0 +1,6 @@
+.DS_Store
+*.json
+__pycache__/
+*.pyc
+IMDB Dataset.csv
+IMDB Dataset.csv.zip
