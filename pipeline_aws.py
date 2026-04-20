@@ -27,17 +27,18 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
 # ==========================================
-# ⚙️ AWS 环境配置
+# AWS configuration
 # ==========================================
-# 建议通过环境变量设置桶名，更安全：export S3_BUCKET="your-bucket-name"
-S3_BUCKET = os.getenv("S3_BUCKET", "你的S3桶名") 
+# Recommended: set the bucket name via environment variable:
+#   export S3_BUCKET="your-bucket-name"
+S3_BUCKET = os.getenv("S3_BUCKET", "your-s3-bucket-name")
 FILE_KEY = "IMDB Dataset.csv"
 N_TRIALS = 3
-# AWS 官方定价 (us-east-1 On-Demand)
+# AWS On-Demand pricing (us-east-1)
 PRICING_USD_PER_HR = { "t3.micro": 0.0104, "t3.small": 0.0208, "t3.medium": 0.0416 }
 
 # ==========================================
-# 📊 资源监控 (全生命周期监控)
+# Resource monitoring (full lifecycle)
 # ==========================================
 class ResourceMonitor:
     def __init__(self, interval=0.1):
@@ -60,43 +61,43 @@ class ResourceMonitor:
         proc = psutil.Process(os.getpid())
         while not self._stop_event.is_set():
             try:
-                # 捕捉 RSS 内存
+                # Track RSS memory usage
                 mem_mb = proc.memory_info().rss / (1024 * 1024)
                 self.peak_memory_mb = max(self.peak_memory_mb, mem_mb)
-                # 捕捉当前进程 CPU 占用
+                # Track CPU usage samples
                 self.cpu_samples.append(psutil.cpu_percent(interval=None))
             except:
                 pass
             time.sleep(self.interval)
 
 # ==========================================
-# 🌍 环境识别 (兼容 IMDSv1 & IMDSv2)
+# Environment detection (IMDSv2 with safe fallback)
 # ==========================================
 def detect_environment():
-    """使用 Token 方式安全获取 EC2 实例元数据"""
+    """Safely fetch EC2 instance type via IMDSv2; fall back to local if unavailable."""
     try:
-        # 1. 尝试获取 IMDSv2 Token (有效期 60 秒)
+        # 1) Get IMDSv2 token (TTL 60 seconds)
         token_url = "http://169.254.169.254/latest/api/token"
         token_resp = requests.put(token_url, headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"}, timeout=2)
         token = token_resp.text
 
-        # 2. 使用 Token 获取实例类型
+        # 2) Use token to fetch instance type
         meta_url = "http://169.254.169.254/latest/meta-data/instance-type"
         resp = requests.get(meta_url, headers={"X-aws-ec2-metadata-token": token}, timeout=2)
         return resp.text.strip(), True
     except Exception:
-        # 如果报错，可能是本地环境或 IMDS 不可用
+        # Likely local execution or IMDS is unavailable/blocked
         return "local-cpu", False
 
 def load_data_s3():
-    print(f"[*] AWS mode: Streaming from s3://{S3_BUCKET}/{FILE_KEY}")
+    print(f"[*] AWS mode: streaming from s3://{S3_BUCKET}/{FILE_KEY}")
     s3 = boto3.client('s3')
     obj = s3.get_object(Bucket=S3_BUCKET, Key=FILE_KEY)
-    # 直接返回 TextIOWrapper 供 pandas 流式读取
+    # Return a streaming body for chunked pandas reads
     return pd.read_csv(obj['Body'], chunksize=5000)
 
 # ==========================================
-# 🧹 NLP 预处理
+# NLP preprocessing
 # ==========================================
 def clean_text(text):
     if not isinstance(text, str): return ""
@@ -109,25 +110,25 @@ def clean_text(text):
     return " ".join([lemmatizer.lemmatize(w) for w in tokens if w not in stop_words])
 
 # ==========================================
-# 🏃 单次 Benchmark 逻辑
+# Single-trial benchmark logic
 # ==========================================
 def run_single_trial(trial_id):
-    print(f"\n🔄 Trial {trial_id+1}/{N_TRIALS} started...")
+    print(f"\n[*] Trial {trial_id+1}/{N_TRIALS} started...")
     
-    # 启动全过程监控，覆盖数据加载、清洗、向量化和训练
+    # Start full-lifecycle monitoring: load -> clean -> vectorize -> train -> inference
     monitor = ResourceMonitor()
     monitor.start()
     
     start_total = time.time()
     
-    # 1. 加载与清洗
+    # 1) Load and clean
     reviews, sentiments = [], []
     for chunk in load_data_s3():
         reviews.extend(chunk['review'].apply(clean_text).tolist())
         sentiments.extend(chunk['sentiment'].tolist())
         gc.collect()
 
-    # 2. 特征工程
+    # 2) Feature engineering
     print("[*] Vectorizing...")
     tfidf = TfidfVectorizer(max_features=5000, dtype=np.float32)
     X = tfidf.fit_transform(reviews)
@@ -136,25 +137,25 @@ def run_single_trial(trial_id):
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # 3. 训练测试
+    # 3) Train
     print("[*] Training model...")
     t0 = time.perf_counter()
     model = LogisticRegression(max_iter=1000, random_state=42)
     model.fit(X_train, y_train)
     train_time = time.perf_counter() - t0
 
-    # 4. 推理测试
+    # 4) Inference
     t1 = time.perf_counter()
     y_pred = model.predict(X_test)
     inf_time = max(time.perf_counter() - t1, 1e-9)
     
-    # 停止监控
+    # Stop monitoring
     monitor.stop()
     
     acc = accuracy_score(y_test, y_pred)
     n_test = len(y_test)
     
-    # 计算指标
+    # Compute metrics
     avg_cpu = np.mean(monitor.cpu_samples) if monitor.cpu_samples else 0
     
     return {
@@ -168,31 +169,31 @@ def run_single_trial(trial_id):
     }
 
 # ==========================================
-# 📤 主程序
+# Main
 # ==========================================
 def main():
-    # 1. 离线/在线兼容的 NLTK 下载
+    # 1) NLTK resource download (may use local cache if already present)
     print("[*] Initializing NLTK resources...")
     for pkg in ['stopwords', 'punkt', 'punkt_tab', 'wordnet', 'omw-1.4']:
         nltk.download(pkg, quiet=True)
 
-    # 2. 环境识别
+    # 2) Detect environment
     instance_type, is_aws = detect_environment()
     print(f"\n{'='*45}")
-    print(f"  🚀 AWS BENCHMARK START: {instance_type}")
+    print(f"  AWS BENCHMARK START: {instance_type}")
     print(f"{'='*45}")
 
-    # 3. 运行试验
+    # 3) Run trials
     trials = []
     for i in range(N_TRIALS):
         trials.append(run_single_trial(i))
 
-    # 4. 统计分析
+    # 4) Aggregate statistics
     agg = {k: {"mean": np.mean([t[k] for t in trials]), "std": np.std([t[k] for t in trials])} for k in trials[0].keys()}
 
-    # 5. 成本计算
+    # 5) Cost analysis
     hourly_rate = PRICING_USD_PER_HR.get(instance_type, 0)
-    # 我们计算单次试验的活跃时间成本（训练+推理）
+    # Estimate active time cost per run (training + inference only)
     active_time_hr = (agg["training_time_sec"]["mean"] + agg["inference_time_sec"]["mean"]) / 3600
     cost_per_run = round(hourly_rate * active_time_hr, 6)
     throughput_per_dollar = round(agg["throughput_pps"]["mean"] / cost_per_run if cost_per_run > 0 else 0, 2)
@@ -213,13 +214,13 @@ def main():
         }
     }
 
-    # 6. 保存
+    # 6) Save results
     out_path = f"benchmark_{instance_type}.json"
     with open(out_path, "w") as f:
         json.dump(final_results, f, indent=2)
 
     print(f"\n{'='*45}")
-    print(f"✅ DONE | Results saved to: {out_path}")
+    print(f"DONE | Results saved to: {out_path}")
     print(f"📊 Accuracy: {final_results['performance']['accuracy']:.4f}")
     print(f"⏱️  Training: {final_results['performance']['training_time_sec']:.2f}s")
     print(f"💾 Peak Memory: {final_results['performance']['peak_memory_mb']:.2f} MB")
