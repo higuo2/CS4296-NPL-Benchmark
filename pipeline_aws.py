@@ -1,9 +1,17 @@
 import pandas as pd
 import numpy as np
 import re
+import sys
 import time
 import psutil
 import os
+
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import nltk
 import gc
 import json
@@ -130,15 +138,15 @@ def run_single_trial(trial_id):
 
     # 3. 训练测试
     print("[*] Training model...")
-    t0 = time.time()
+    t0 = time.perf_counter()
     model = LogisticRegression(max_iter=1000, random_state=42)
     model.fit(X_train, y_train)
-    train_time = time.time() - t0
+    train_time = time.perf_counter() - t0
 
     # 4. 推理测试
-    t1 = time.time()
+    t1 = time.perf_counter()
     y_pred = model.predict(X_test)
-    inf_time = time.time() - t1
+    inf_time = max(time.perf_counter() - t1, 1e-9)
     
     # 停止监控
     monitor.stop()
@@ -165,7 +173,7 @@ def run_single_trial(trial_id):
 def main():
     # 1. 离线/在线兼容的 NLTK 下载
     print("[*] Initializing NLTK resources...")
-    for pkg in ['stopwords', 'punkt', 'wordnet']:
+    for pkg in ['stopwords', 'punkt', 'punkt_tab', 'wordnet', 'omw-1.4']:
         nltk.download(pkg, quiet=True)
 
     # 2. 环境识别

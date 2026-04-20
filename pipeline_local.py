@@ -1,13 +1,23 @@
 import pandas as pd
 import numpy as np
 import re
+import sys
 import time
 import psutil
 import os
+
+# Windows 控制台默认 GBK，直接 print emoji 会 UnicodeEncodeError
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import nltk
 import gc
 import json
 import threading
+import zipfile
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
@@ -20,6 +30,7 @@ from sklearn.metrics import accuracy_score
 # ⚙️ 本地环境配置
 # ==========================================
 LOCAL_FILE = "IMDB Dataset.csv"  # 需与脚本同目录
+LOCAL_ZIP = "IMDB Dataset.csv.zip"
 N_TRIALS = 3                     # Proposal 要求：至少3次运行取平均
 
 # ==========================================
@@ -57,7 +68,15 @@ def detect_environment():
 def load_data():
     print(f"[*] Local mode: Loading {LOCAL_FILE}")
     if not os.path.exists(LOCAL_FILE):
-        raise FileNotFoundError(f"Dataset {LOCAL_FILE} not found. Please place it in the same directory.")
+        if os.path.exists(LOCAL_ZIP):
+            print(f"[*] Extracting {LOCAL_ZIP} ...")
+            with zipfile.ZipFile(LOCAL_ZIP, "r") as zf:
+                zf.extractall(".")
+        else:
+            raise FileNotFoundError(
+                f"Dataset {LOCAL_FILE} not found (and no {LOCAL_ZIP}). "
+                "Place the CSV or the zip from the repo in the same directory as this script."
+            )
     return pd.read_csv(LOCAL_FILE, chunksize=5000)
 
 # ==========================================
@@ -96,16 +115,16 @@ def run_single_trial(trial_id, monitor):
 
     print("[*] Training LogisticRegression...")
     monitor.start()
-    t0 = time.time()
+    t0 = time.perf_counter()
     model = LogisticRegression(max_iter=1000, random_state=42)
     model.fit(X_train, y_train)
-    train_time = time.time() - t0
+    train_time = time.perf_counter() - t0
     monitor.stop()
 
     print("[*] Inference testing...")
-    t1 = time.time()
+    t1 = time.perf_counter()
     y_pred = model.predict(X_test)
-    inf_time = time.time() - t1
+    inf_time = max(time.perf_counter() - t1, 1e-9)
     acc = accuracy_score(y_test, y_pred)
 
     n_test = len(y_test)
@@ -128,7 +147,7 @@ def run_single_trial(trial_id, monitor):
 # 📤 主程序 & 结果固化
 # ==========================================
 def main():
-    for pkg in ['stopwords', 'punkt', 'wordnet']:
+    for pkg in ['stopwords', 'punkt', 'punkt_tab', 'wordnet', 'omw-1.4']:
         nltk.download(pkg, quiet=True)
 
     instance_type, is_aws = detect_environment()
