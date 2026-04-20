@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "instance_type": "t3.small",
+    "is_aws": true,
+    "trials": 3,
+    "timestamp": "2026-04-20 08:43:02"
+  },
+  "performance": {
+    "accuracy": 0.8863,
+    "training_time_sec": 0.6206666666666667,
+    "inference_time_sec": 0.0030000000000000005,
+    "throughput_pps": 3219501.0566666666,
+    "avg_inference_latency_ms": 0.0003,
+    "peak_memory_mb": 485.65333333333336,
+    "avg_cpu_percent": 50.39666666666667
+  },
+  "variability": {
+    "accuracy": 0.0,
+    "training_time_sec": 0.0036817870057290905,
+    "inference_time_sec": 4.336808689942018e-19,
+    "throughput_pps": 27757.540842829578,
+    "avg_inference_latency_ms": 0.0,
+    "peak_memory_mb": 10.764931748764393,
+    "avg_cpu_percent": 0.05436502143433168
+  },
+  "cost_analysis": {
+    "hourly_rate_usd": 0.0208,
+    "cost_per_run_usd": 4e-06,
+    "throughput_per_dollar": 804875264166.67
+  }
+}
